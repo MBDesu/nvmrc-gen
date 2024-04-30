@@ -138,7 +138,7 @@ func GetPackageEnginesNode(pkg string, versionRange string) (string, error) {
 		}
 		if len(pkgInfoJson.Engines) > 0 {
 			pkgEngines := pkgInfoJson.Engines["node"].(string)
-			fmt.Println(bold(blue("[+]   ")), yellow("found"), "Node@"+pkgEngines, yellow("for"), pkg+"@"+pkgVersion)
+			fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), "Node@"+pkgEngines, yellow("for"), pkg+"@"+pkgVersion)
 			return pkgEngines, nil
 		}
 	}
@@ -158,7 +158,7 @@ func GetPackageJsonDependencies() (map[string]string, error) {
 	}
 	defer f.Close()
 
-	fmt.Println(bold(blue("[+] ")), yellow("parsing"), "package.json", yellow("dependencies"))
+	fmt.Fprintln(out, bold(blue("[+] ")), yellow("parsing"), "package.json", yellow("dependencies"))
 	packageJsonBinary, err := io.ReadAll(f)
 	if err != nil {
 		return dependencies, err
@@ -184,7 +184,7 @@ func GetMinNodeVersion() string {
 	var wg sync.WaitGroup
 	for dep, ver := range dependencies {
 		wg.Add(1)
-		fmt.Println(bold(blue("[+]")), yellow("fetching"), dep+"@"+ver, yellow("metadata"))
+		fmt.Fprintln(out, bold(blue("[+]")), yellow("fetching"), dep+"@"+ver, yellow("metadata"))
 
 		go func(d, v string) {
 			defer wg.Done()
@@ -200,7 +200,7 @@ func GetMinNodeVersion() string {
 	for engine := range engines {
 		engineSemverConstraint, err := semver.NewConstraint(engine)
 		if err != nil {
-			fmt.Println(bold(red("[!]")), engine, "is not a valid semver")
+			fmt.Fprintln(out, bold(red("[!]")), engine, "is not a valid semver")
 			continue
 		}
 		engineSemverConstraints = append(engineSemverConstraints, engineSemverConstraint)
@@ -212,7 +212,7 @@ func GetMinNodeVersion() string {
 	for nodeVersion := range allNodeVersions {
 		nodeSemver, err := semver.NewVersion(nodeVersion)
 		if err != nil {
-			fmt.Println(bold(red("[!]")), nodeVersion, "is not a valid semver")
+			fmt.Fprintln(out, bold(red("[!]")), nodeVersion, "is not a valid semver")
 			continue
 		}
 		isCandidate := true
