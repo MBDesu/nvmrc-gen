@@ -12,8 +12,12 @@ Add `nvmrc-gen` to your `PATH` or copy it directly where it is intended to be ra
 
 ### Flags
 
-`-c`: CI mode. Don't prompt for writing of files.
-`-s`: Silent mode. Output no logs.
+| Flag | Description                                        |
+| :--: | :-----------------------------------------------   |
+| `-c` | CI mode. Don't prompt for writing of files.        |
+| `-l` | Include non-LTS (oddly versioned) Node releases.   |
+| `-m` | Get max Node version rather than min Node version. |
+| `-s` | Silent mode. Output no logs.                       |
 
 
 ## Building

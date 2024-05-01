@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/Masterminds/semver"
@@ -33,26 +35,43 @@ type PackageJson struct {
 	Version         string            `json:"version"`
 }
 
+type MinMax bool
+
+const (
+	Min = false
+	Max = true
+)
+
 var getAllNodeVersionsUrl string = "https://nodejs.org/dist/index.json"
 var npmRegistryBaseUrl string = "https://registry.npmjs.com"
 
-func GetAllNodeVersions() (map[string]string, error) {
+func getAllNodeSemvers(ltsOnly bool) ([]*semver.Version, error) {
 	var nodeVersions []NodeVersion
-	var nodeNpmVersionMap = make(map[string]string)
+	var nodeSemvers = make([]*semver.Version, 0, 100)
 	var client http.Client
 	response, err := client.Get(getAllNodeVersionsUrl)
 	if err != nil {
 		err = fmt.Errorf("GetAllNodeVersions: %s", color.RedString("error fetching Node versions"))
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode == http.StatusOK {
 		nodeJson, _ := io.ReadAll(response.Body)
 		json.Unmarshal(nodeJson, &nodeVersions)
 	}
+
 	for _, node := range nodeVersions {
-		nodeNpmVersionMap[node.Version] = node.Npm
+		nodeSemver, err := semver.NewVersion(strings.Replace(node.Version, "v", "", 1))
+		if err == nil && (!ltsOnly || nodeSemver.Major()%2 == 0) {
+			nodeSemvers = append(nodeSemvers, nodeSemver)
+		}
 	}
-	return nodeNpmVersionMap, err
+
+	slices.SortFunc(nodeSemvers, func(a, b *semver.Version) int {
+		return a.Compare(b)
+	})
+
+	return nodeSemvers, err
 }
 
 func getPackageVersions(pkg string) ([]string, error) {
@@ -83,7 +102,7 @@ func getPackageVersions(pkg string) ([]string, error) {
 	return make([]string, 0), nil
 }
 
-func getSuitableVersion(versionRange string, depVersions []string) string {
+func getSuitableVersionString(max MinMax, versionRange string, depVersions []string) string {
 	versionConstraint, err := semver.NewConstraint(versionRange)
 	if err != nil {
 		return versionRange
@@ -99,44 +118,42 @@ func getSuitableVersion(versionRange string, depVersions []string) string {
 			candidateVersions = append(candidateVersions, depSemver)
 		}
 	}
-
-	max, err := semver.NewVersion("0.0.0")
-	if err != nil {
+	slices.SortFunc(candidateVersions, func(a, b *semver.Version) int {
+		return a.Compare(b)
+	})
+	if max {
 		return candidateVersions[len(candidateVersions)-1].Original()
 	}
-	for _, candidateVersion := range candidateVersions {
-		if candidateVersion.GreaterThan(max) {
-			max = candidateVersion
-		}
-	}
-
-	return max.Original()
+	return candidateVersions[0].Original()
 }
 
-func GetPackageEnginesNode(pkg string, versionRange string) (string, error) {
+func getPackageEnginesNodeString(pkg string, versionRange string) (string, error) {
 	var client http.Client
 	packageVersions, err := getPackageVersions(pkg)
 	if err != nil {
 		return "", err
 	}
-	pkgVersion := getSuitableVersion(versionRange, packageVersions)
+	pkgVersion := getSuitableVersionString(Min, versionRange, packageVersions)
 
 	enginesResponse, err := client.Get(fmt.Sprintf("%s/%s/%s", npmRegistryBaseUrl, pkg, pkgVersion))
 	if err != nil {
 		return "", err
 	}
 	defer enginesResponse.Body.Close()
+
 	if enginesResponse.StatusCode == http.StatusOK {
 		pkgInfo, err := io.ReadAll(enginesResponse.Body)
 		if err != nil {
 			return "", err
 		}
+
 		var pkgInfoJson PackageInfo
 		err = json.Unmarshal(pkgInfo, &pkgInfoJson)
 		if err != nil {
 			return "", err
 		}
-		if len(pkgInfoJson.Engines) > 0 {
+
+		if len(pkgInfoJson.Engines) > 0 && pkgInfoJson.Engines["node"] != nil {
 			pkgEngines := pkgInfoJson.Engines["node"].(string)
 			fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), "Node@"+pkgEngines, yellow("for"), pkg+"@"+pkgVersion)
 			return pkgEngines, nil
@@ -145,7 +162,7 @@ func GetPackageEnginesNode(pkg string, versionRange string) (string, error) {
 	return "", err
 }
 
-func GetPackageJsonDependencies() (map[string]string, error) {
+func parsePackageJsonDependencies() (map[string]string, error) {
 	dependencies := make(map[string]string)
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -154,7 +171,7 @@ func GetPackageJsonDependencies() (map[string]string, error) {
 	packageJsonPath := cwd + "/package.json"
 	f, err := os.Open(packageJsonPath)
 	if err != nil {
-		return dependencies, fmt.Errorf(bold(red("[!]")), "GetPackageJsonDependencies: %s %s", red("file not found:"), blue(packageJsonPath))
+		return dependencies, fmt.Errorf(bold(red("[!]")), "parsePackageJsonDependencies: %s %s", red("file not found:"), blue(packageJsonPath))
 	}
 	defer f.Close()
 
@@ -176,8 +193,41 @@ func GetPackageJsonDependencies() (map[string]string, error) {
 	return dependencies, nil
 }
 
-func GetMinNodeVersion() string {
-	dependencies, err := GetPackageJsonDependencies()
+func convertRangeStringsToConstraints(engines Set[string]) []*semver.Constraints {
+	constraints := make([]*semver.Constraints, 0, len(engines))
+	for engine := range engines {
+		engineSemverConstraint, err := semver.NewConstraint(engine)
+		if err != nil {
+			fmt.Fprintln(out, bold(red("[!]")), engine, "is not a valid semver")
+			continue
+		}
+		constraints = append(constraints, engineSemverConstraint)
+	}
+	return constraints
+}
+
+func getSatisfyingVersions(semvers []*semver.Version, constraints []*semver.Constraints) []*semver.Version {
+	satisfyingSemvers := make([]*semver.Version, 0, 10)
+	for _, nodeSemver := range semvers {
+		isCandidate := true
+		for _, constraint := range constraints {
+			if !constraint.Check(nodeSemver) {
+				isCandidate = false
+				break
+			}
+		}
+		if isCandidate {
+			satisfyingSemvers = append(satisfyingSemvers, nodeSemver)
+		}
+	}
+	slices.SortFunc(satisfyingSemvers, func(a, b *semver.Version) int {
+		return a.Compare(b)
+	})
+	return satisfyingSemvers
+}
+
+func GetSatisfyingNodeVersion(max MinMax) string {
+	dependencies, err := parsePackageJsonDependencies()
 	check(err)
 
 	engines := make(Set[string])
@@ -188,7 +238,7 @@ func GetMinNodeVersion() string {
 
 		go func(d, v string) {
 			defer wg.Done()
-			engine, err := GetPackageEnginesNode(d, v)
+			engine, err := getPackageEnginesNodeString(d, v)
 			check(err)
 			engines.Add(engine)
 		}(dep, ver)
@@ -196,46 +246,13 @@ func GetMinNodeVersion() string {
 	wg.Wait()
 	engines.Remove("")
 
-	engineSemverConstraints := make([]*semver.Constraints, 0, len(engines))
-	for engine := range engines {
-		engineSemverConstraint, err := semver.NewConstraint(engine)
-		if err != nil {
-			fmt.Fprintln(out, bold(red("[!]")), engine, "is not a valid semver")
-			continue
-		}
-		engineSemverConstraints = append(engineSemverConstraints, engineSemverConstraint)
-	}
-
-	allNodeVersions, err := GetAllNodeVersions()
+	engineConstraints := convertRangeStringsToConstraints(engines)
+	allNodeSemvers, err := getAllNodeSemvers(flags.isNonLts)
 	check(err)
-	candidateNodeSemvers := make([]*semver.Version, 0, 10)
-	for nodeVersion := range allNodeVersions {
-		nodeSemver, err := semver.NewVersion(nodeVersion)
-		if err != nil {
-			fmt.Fprintln(out, bold(red("[!]")), nodeVersion, "is not a valid semver")
-			continue
-		}
-		isCandidate := true
-		for _, constraint := range engineSemverConstraints {
-			if !constraint.Check(nodeSemver) {
-				isCandidate = false
-				break
-			}
-		}
-		if isCandidate {
-			candidateNodeSemvers = append(candidateNodeSemvers, nodeSemver)
-		}
-	}
+	validNodeSemvers := getSatisfyingVersions(allNodeSemvers, engineConstraints)
 
-	if len(candidateNodeSemvers) > 0 {
-		minNodeSemver := candidateNodeSemvers[0]
-		for _, nodeSemver := range candidateNodeSemvers {
-			if nodeSemver.LessThan(minNodeSemver) {
-				minNodeSemver = nodeSemver
-			}
-		}
-		return minNodeSemver.Original()
+	if max {
+		return validNodeSemvers[len(validNodeSemvers)-1].Original()
 	}
-
-	return "0.0.0"
+	return validNodeSemvers[0].Original()
 }

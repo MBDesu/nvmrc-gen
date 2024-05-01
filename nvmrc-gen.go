@@ -10,8 +10,16 @@ import (
 	"github.com/fatih/color"
 )
 
+type Flags struct {
+	isCiMode     bool
+	isSilentMode bool
+	isMaxNode    bool
+	isNonLts     bool
+}
+
 var blue = color.New(color.FgBlue).SprintFunc()
 var bold = color.New(color.Bold).SprintFunc()
+var flags Flags
 var green = color.New(color.FgGreen).SprintFunc()
 var red = color.New(color.FgRed).SprintFunc()
 var yellow = color.New(color.FgYellow).SprintFunc()
@@ -24,13 +32,19 @@ func check(e error) {
 	}
 }
 
-func main() {
+func parseFlags() {
 	ciModePtr := flag.Bool("c", false, "CI mode. Don't prompt for writing of files.")
+	nonLtsPtr := flag.Bool("l", false, "Include non-LTS (oddly versioned) Node releases.")
+	maxPtr := flag.Bool("m", false, "Get max Node version rather than min Node version.")
 	silentModePtr := flag.Bool("s", false, "Silent mode. Output no logs.")
-
 	flag.Parse()
+	flags = Flags{*ciModePtr, *silentModePtr, *maxPtr, *nonLtsPtr}
+}
 
-	if *silentModePtr {
+func main() {
+	parseFlags()
+
+	if flags.isSilentMode {
 		out = io.Discard
 	}
 
@@ -41,22 +55,31 @@ func main() {
 
 	fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), lockfileName, yellow("lockfile"))
 
-	minNodeVersion := GetMinNodeVersion()
+	var MinMax MinMax
+	var minMax string
+	if flags.isMaxNode {
+		MinMax = Max
+		minMax = "maximum"
+	} else {
+		MinMax = Min
+		minMax = "minimum"
+	}
 
+	satisfyingNodeVersion := GetSatisfyingNodeVersion(MinMax)
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), minNodeVersion, yellow("minimum Node"))
+	fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), satisfyingNodeVersion, yellow(minMax), "Node")
 	fmt.Fprintln(out)
 
-	if *ciModePtr {
-		err = WriteNvmrc(minNodeVersion)
+	if flags.isCiMode {
+		err = WriteNvmrc(satisfyingNodeVersion)
 		check(err)
 	} else {
-		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+minNodeVersion+"? ", bold(green("([y]/n) ")))
+		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+satisfyingNodeVersion+"? ", bold(green("([y]/n) ")))
 		var yn string
 		fmt.Scanln(&yn)
 		if !(yn == "N" || yn == "n") {
 			fmt.Fprintln(out, bold(blue("[+] ")), yellow("writing"), bold(".nvmrc"))
-			err = WriteNvmrc(minNodeVersion)
+			err = WriteNvmrc(satisfyingNodeVersion)
 			check(err)
 		}
 	}
