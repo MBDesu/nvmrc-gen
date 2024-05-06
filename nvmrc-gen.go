@@ -71,7 +71,7 @@ func main() {
 	fmt.Fprintln(out)
 
 	if flags.isCiMode || flags.isSilentMode {
-		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+satisfyingNodeVersion+"? ", bold(green("([y]/n) ")))
+		fmt.Fprintln(out, bold(blue("[+] ")), yellow("writing"), bold(".nvmrc"))
 		check(err)
 	} else {
 		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+satisfyingNodeVersion+"? ", bold(green("([y]/n) ")))
