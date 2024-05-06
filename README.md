@@ -48,4 +48,3 @@ Feel free to contribute in any way you like. This was my first project in Go, an
 ### TODO
 
 - [ ] Better error handling
-- [ ] Check `package-lock.json` or equivalent for dependency version rather than grabbing the max of a semver range
