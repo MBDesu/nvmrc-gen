@@ -121,10 +121,13 @@ func getSuitableVersionString(max MinMax, versionRange string, depVersions []str
 	slices.SortFunc(candidateVersions, func(a, b *semver.Version) int {
 		return a.Compare(b)
 	})
-	if max {
-		return candidateVersions[len(candidateVersions)-1].Original()
+	if len(candidateVersions) > 0 {
+		if max {
+			return candidateVersions[len(candidateVersions)-1].Original()
+		}
+		return candidateVersions[0].Original()
 	}
-	return candidateVersions[0].Original()
+	return ""
 }
 
 func getPackageEnginesNodeString(pkg string, versionRange string) (string, error) {
@@ -133,7 +136,7 @@ func getPackageEnginesNodeString(pkg string, versionRange string) (string, error
 	if err != nil {
 		return "", err
 	}
-	pkgVersion := getSuitableVersionString(Min, versionRange, packageVersions)
+	pkgVersion := getSuitableVersionString(Max, versionRange, packageVersions)
 
 	enginesResponse, err := client.Get(fmt.Sprintf("%s/%s/%s", npmRegistryBaseUrl, pkg, pkgVersion))
 	if err != nil {
@@ -231,6 +234,7 @@ func GetSatisfyingNodeVersion(max MinMax) string {
 	check(err)
 
 	engines := make(Set[string])
+	queue := make(chan string, len(dependencies))
 	var wg sync.WaitGroup
 	for dep, ver := range dependencies {
 		wg.Add(1)
@@ -240,10 +244,14 @@ func GetSatisfyingNodeVersion(max MinMax) string {
 			defer wg.Done()
 			engine, err := getPackageEnginesNodeString(d, v)
 			check(err)
-			engines.Add(engine)
+			queue <- engine
 		}(dep, ver)
 	}
 	wg.Wait()
+	close(queue)
+	for engine := range queue {
+		engines.Add(engine)
+	}
 	engines.Remove("")
 
 	engineConstraints := convertRangeStringsToConstraints(engines)
