@@ -70,8 +70,8 @@ func main() {
 	fmt.Fprintln(out, bold(blue("[+]   ")), yellow("found"), satisfyingNodeVersion, yellow(minMax), "Node")
 	fmt.Fprintln(out)
 
-	if flags.isCiMode {
-		err = WriteNvmrc(satisfyingNodeVersion)
+	if flags.isCiMode || flags.isSilentMode {
+		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+satisfyingNodeVersion+"? ", bold(green("([y]/n) ")))
 		check(err)
 	} else {
 		fmt.Fprint(out, bold(green("[?] ")), "Write ", bold(blue(".nvmrc")), " with", " "+satisfyingNodeVersion+"? ", bold(green("([y]/n) ")))
