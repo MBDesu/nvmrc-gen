@@ -1,6 +1,8 @@
 # nvmrc-gen
 
-`nvmrc-gen` is a CLI utility that generates a `.nvmrc` file in a Node project for use with `nvm`. Its primary purpose is for use in CI/CD pipelines, but it can also be useful for developers generating `.nvmrc` files for their own use.
+`nvmrc-gen` is a CLI utility that generates a `.nvmrc` file in a Node project for use with `nvm`. It searches the project's dependencies and finds the minimum (or maximum) Node version compatible with the project.
+
+`nvmrc-gen`'s primary purpose is for use in CI/CD pipelines, but it can also be useful for developers generating `.nvmrc` files for their own use.
 
 
 ## Usage
